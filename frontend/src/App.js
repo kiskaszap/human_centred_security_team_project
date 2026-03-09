@@ -1,9 +1,7 @@
 import { useState } from "react";
 
 function App() {
-  // ─────────────────────────────
-  // STATE
-  // ─────────────────────────────
+
   const [loggedIn, setLoggedIn] = useState(false);
   const [started, setStarted] = useState(false);
 
@@ -20,9 +18,6 @@ function App() {
 
   const [error, setError] = useState("");
 
-  // ─────────────────────────────
-  // LOGIN – PRIMARY FACTOR
-  // ─────────────────────────────
 
 
   function getCookie(name) {
@@ -45,7 +40,7 @@ function App() {
   const loginUser = async () => {
   setError("");
 
-  // biztosítjuk, hogy CSRF cookie létezzen
+
   await fetch("/api/csrf/", { credentials: "include" });
 
   const res = await fetch("/api/login/", {
@@ -71,9 +66,6 @@ function App() {
 };
 
 
-  // ─────────────────────────────
-  // 2FA – START
-  // ─────────────────────────────
   const start2FA = async () => {
     setError("");
 
@@ -91,9 +83,7 @@ function App() {
     loadChallenge();
   };
 
-  // ─────────────────────────────
-  // 2FA – GET CHALLENGE
-  // ─────────────────────────────
+
   const loadChallenge = async () => {
     setError("");
 
@@ -113,9 +103,7 @@ function App() {
     setOptions(data.options);
   };
 
-  // ─────────────────────────────
-  // 2FA – SUBMIT ANSWER
-  // ─────────────────────────────
+
   const submitAnswer = async (songId) => {
     const res = await fetch("/api/2fa/answer/", {
       method: "POST",
@@ -139,9 +127,6 @@ function App() {
     }
   };
 
-  // ─────────────────────────────
-  // UI
-  // ─────────────────────────────
   return (
     <div style={styles.page}>
       <div style={styles.card}>
