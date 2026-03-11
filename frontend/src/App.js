@@ -1,12 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 
 function App() {
-
   const [loggedIn, setLoggedIn] = useState(false);
   const [started, setStarted] = useState(false);
 
   const [round, setRound] = useState(0);
-  const [audioUrl, setAudioUrl] = useState("");
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [startTime, setStartTime] = useState(0);
   const [options, setOptions] = useState([]);
 
   const [correct, setCorrect] = useState(0);
@@ -15,67 +15,59 @@ function App() {
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-
   const [error, setError] = useState("");
 
-
+  const playerRef = useRef(null);
+  const apiLoadedRef = useRef(false);
 
   function getCookie(name) {
-  let cookieValue = null;
-  if (document.cookie && document.cookie !== "") {
-    const cookies = document.cookie.split(";");
-    for (let i = 0; i < cookies.length; i++) {
-      const cookie = cookies[i].trim();
-      if (cookie.startsWith(name + "=")) {
-        cookieValue = decodeURIComponent(
-          cookie.substring(name.length + 1)
-        );
-        break;
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== "") {
+      const cookies = document.cookie.split(";");
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.startsWith(name + "=")) {
+          cookieValue = decodeURIComponent(
+            cookie.substring(name.length + 1)
+          );
+          break;
+        }
       }
     }
+    return cookieValue;
   }
-  return cookieValue;
-}
 
   const loginUser = async () => {
-  setError("");
+    setError("");
+    await fetch("/api/csrf/", { credentials: "include" });
 
+    const res = await fetch("/api/login/", {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-CSRFToken": getCookie("csrftoken"),
+      },
+      body: new URLSearchParams({ username, password }),
+    });
 
-  await fetch("/api/csrf/", { credentials: "include" });
+    if (!res.ok) {
+      setError("Invalid username or password");
+      return;
+    }
 
-  const res = await fetch("/api/login/", {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      "X-CSRFToken": getCookie("csrftoken"),
-    },
-    body: new URLSearchParams({
-      username,
-      password,
-    }),
-  });
-
-  if (!res.ok) {
-    setError("Hibás felhasználónév vagy jelszó");
-    return;
-  }
-
-  setLoggedIn(true);
-  start2FA();
-};
-
+    setLoggedIn(true);
+    start2FA();
+  };
 
   const start2FA = async () => {
-    setError("");
-
     const res = await fetch("/api/2fa/start/", {
       method: "POST",
       credentials: "include",
     });
 
     if (!res.ok) {
-      setError("Nem sikerült elindítani a 2FA-t.");
+      setError("Account blocked, please try again 5 mins later");
       return;
     }
 
@@ -83,10 +75,7 @@ function App() {
     loadChallenge();
   };
 
-
   const loadChallenge = async () => {
-    setError("");
-
     const res = await fetch("/api/2fa/challenge/", {
       credentials: "include",
     });
@@ -94,26 +83,22 @@ function App() {
     const data = await res.json();
 
     if (!res.ok) {
-      setError(data.error || "Hiba a challenge lekérésekor");
+      setError(data.error || "Challenge error");
       return;
     }
 
     setRound(data.round);
-    setAudioUrl(data.audio_url);
+    setYoutubeUrl(data.youtube_url);
+    setStartTime(data.start_time);
     setOptions(data.options);
   };
-
 
   const submitAnswer = async (songId) => {
     const res = await fetch("/api/2fa/answer/", {
       method: "POST",
       credentials: "include",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        song_id: songId,
-      }),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ song_id: songId }),
     });
 
     const data = await res.json();
@@ -127,11 +112,85 @@ function App() {
     }
   };
 
+  useEffect(() => {
+    if (apiLoadedRef.current) return;
+
+    const tag = document.createElement("script");
+    tag.src = "https://www.youtube.com/iframe_api";
+    document.body.appendChild(tag);
+
+    apiLoadedRef.current = true;
+  }, []);
+
+
+  useEffect(() => {
+    if (!youtubeUrl || !window.YT) return;
+
+    const videoId =
+      new URL(youtubeUrl).searchParams.get("v") ||
+      youtubeUrl.split("/").pop();
+
+    const playSnippet = () => {
+      if (!playerRef.current) {
+        playerRef.current = new window.YT.Player("hidden-player", {
+          height: "0",
+          width: "0",
+          videoId: videoId,
+          playerVars: {
+            autoplay: 1,
+            controls: 0,
+            modestbranding: 1,
+            rel: 0,
+            iv_load_policy: 3,
+          },
+          events: {
+            onReady: (event) => {
+              event.target.seekTo(startTime);
+              event.target.playVideo();
+              setTimeout(() => {
+                event.target.stopVideo();
+              }, 3000);
+            },
+          },
+        });
+      } else {
+        playerRef.current.loadVideoById({
+          videoId: videoId,
+          startSeconds: startTime,
+        });
+
+        setTimeout(() => {
+          playerRef.current.stopVideo();
+        }, 3000);
+      }
+    };
+
+    if (window.YT && window.YT.Player) {
+      playSnippet();
+    } else {
+      window.onYouTubeIframeAPIReady = playSnippet;
+    }
+  }, [youtubeUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (playerRef.current) {
+        try {
+          playerRef.current.stopVideo();
+        } catch (e) {}
+      }
+    };
+  }, []);
+
   return (
     <div style={styles.page}>
+      <div id="hidden-player" style={{ display: "none" }}></div>
+
       <div style={styles.card}>
-        <h1 style={styles.title}>🎧 Playlist Passwordmania</h1>
-        <p style={styles.subtitle}>Audio-based Two-Factor Authentication</p>
+        <h1 style={styles.title}>Playlist Passwordmania</h1>
+        <p style={styles.subtitle}>
+          Music-based Two-Factor Authentication
+        </p>
 
         {error && <div style={styles.error}>{error}</div>}
 
@@ -167,29 +226,27 @@ function App() {
               />
             </div>
 
-            <p style={styles.info}>
-              Round {round} / 5 · Correct {correct} / 3
-            </p>
+           
 
-            <audio src={audioUrl} controls autoPlay style={styles.audio} />
-
-            <div>
-              {options.map((o) => (
-                <button
-                  key={o.id}
-                  style={styles.optionButton}
-                  onClick={() => submitAnswer(o.id)}
-                >
-                  {o.title}
-                </button>
-              ))}
-            </div>
+            {options.map((o) => (
+              <button
+                key={o.id}
+                style={styles.optionButton}
+                onClick={() => submitAnswer(o.id)}
+              >
+                {o.title}
+              </button>
+            ))}
           </>
         )}
 
         {finished && (
           <div style={styles.result}>
-            <h2>{success ? "✅ Authentication Successful" : "❌ Authentication Failed"}</h2>
+            <h2>
+              {success
+                ? "Authentication Successful"
+                : "Authentication Failed"}
+            </h2>
             <button
               style={styles.secondaryButton}
               onClick={() => window.location.reload()}
@@ -259,7 +316,6 @@ const styles = {
     borderRadius: 6,
     cursor: "pointer",
   },
-  audio: { width: "100%", marginTop: 16 },
   progress: {
     height: 6,
     background: "#374151",
